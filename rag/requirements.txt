@@ -1,0 +1,11 @@
+beautifulsoup4==4.13.3
+fastapi==0.115.9
+httpx==0.28.1
+lxml==5.3.1
+playwright==1.51.0
+numpy>=1.26
+pydantic==2.11.2
+pydantic-settings==2.8.1
+sentence-transformers==3.4.1
+tenacity==9.0.0
+uvicorn==0.34.0

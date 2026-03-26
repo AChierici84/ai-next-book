@@ -1,36 +1,85 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# RAG biblioteca
 
-## Getting Started
+Servizio Python separato per:
 
-First, run the development server:
+- estrarre libri da OPAC Reggio Emilia anno per anno
+- salvare i documenti in ChromaDB
+- esporre una FastAPI interrogabile dalla UI web
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## Stack
+
+- Playwright per navigare la paginazione JS di OPAC
+- BeautifulSoup per parsing HTML
+- ChromaDB come vector store persistente
+- sentence-transformers per embeddings multilingua
+- FastAPI per la query API
+
+## Setup
+
+```powershell
+cd rag
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+python -m playwright install chromium
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Ingest iniziale
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Esempio: dal 2026 al 2024
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```powershell
+python ingest_opac.py --start-year 2026 --end-year 2024
+```
 
-## Learn More
+Esempio rapido limitando le pagine per test:
 
-To learn more about Next.js, take a look at the following resources:
+```powershell
+python ingest_opac.py --start-year 2026 --end-year 2026 --max-pages-per-year 3
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+I dati vengono salvati in `rag/data/chroma`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Avvio API
 
-## Deploy on Vercel
+```powershell
+uvicorn app.main:app --reload --port 8001
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Endpoint
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+### Health
+
+```http
+GET /health
+```
+
+### Statistiche
+
+```http
+GET /stats
+```
+
+### Query semantica
+
+```http
+POST /query
+Content-Type: application/json
+
+{
+  "query": "romanzo storico ambientato in italia",
+  "limit": 5,
+  "year_from": 2020,
+  "year_to": 2026
+}
+```
+
+## Integrazione con la UI web
+
+La UI Next.js puo chiamare la FastAPI su `http://localhost:8001/query` e usare i risultati come sorgente RAG per suggerimenti piu accurati.
+
+## Note operative
+
+- La paginazione di OPAC e gestita via JavaScript: per questo l'ingest usa Playwright.
+- Il crawler visita la pagina anno, attraversa le pagine risultati e poi arricchisce i record aprendo le schede dettaglio.
+- Per ingest molto grandi conviene eseguire per blocchi di anni.
