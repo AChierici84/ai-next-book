@@ -20,14 +20,10 @@ class BookDocument(BaseModel):
         parts = [
             f"Titolo: {self.title}",
             f"Autore: {self.author}" if self.author else None,
-            f"Anno: {self.year}" if self.year else None,
-            f"Tipologia: {self.material_type}" if self.material_type else None,
             f"Riassunto: {self.summary}" if self.summary else None,
-            f"Biblioteche: {', '.join(self.libraries)}" if self.libraries else None,
-            f"Disponibilita: {self.available_copies}/{self.total_copies}" if self.available_copies is not None else None,
-            f"URL: {self.source_url}",
         ]
         return "\n".join(part for part in parts if part)
+
 
     def to_metadata(self) -> dict[str, str | int | float | bool]:
         return {
