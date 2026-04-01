@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime
 import logging
 import re
 from dataclasses import dataclass
 from math import ceil
-from urllib.parse import urljoin
+from urllib.parse import quote, urljoin
 
 import httpx
 from bs4 import BeautifulSoup, Tag
@@ -37,6 +38,84 @@ class OpacScraper:
 
     def close(self) -> None:
         self._http.close()
+
+    def fetch_resource_live(
+        self,
+        resource_id: str | None = None,
+        source_url: str | None = None,
+    ) -> BookDocument | None:
+        resolved_id = (resource_id or "").strip()
+        resolved_url = (source_url or "").strip()
+
+        if not resolved_url and resolved_id:
+            resolved_url = f"{settings.opac_base_url}/opac/resource/{resolved_id}"
+
+        if not resolved_url:
+            return None
+
+        response = self._http.get(resolved_url)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+
+        final_url = str(response.url)
+        soup = BeautifulSoup(response.text, "lxml")
+
+        title = self._extract_title(soup)
+        if not title:
+            return None
+
+        final_id = resolved_id or final_url.rstrip("/").split("/")[-1]
+        page_text = soup.get_text(" ", strip=True)
+        year = self._extract_year(soup)
+
+        return BookDocument(
+            id=final_id,
+            title=title,
+            author=self._extract_author(soup),
+            year=year,
+            material_type=self._extract_material_type(soup),
+            summary=self._extract_abstract(soup),
+            libraries=self._extract_libraries(soup),
+            available_copies=self._extract_number(page_text, "Disponibili"),
+            total_copies=self._extract_number(page_text, "Copie per prestito"),
+            source_url=final_url,
+            cover_url=self._extract_cover_url(soup, final_url),
+            query_year=year or datetime.now().year,
+        )
+
+    def search_books_live(
+        self,
+        title: str,
+        author: str | None = None,
+        limit: int = 3,
+    ) -> list[BookDocument]:
+        title_value = (title or "").strip()
+        author_value = (author or "").strip()
+        if not title_value:
+            return []
+
+        query_text = f"{title_value} {author_value}".strip()
+        query_url = f"{settings.opac_base_url}/opac/query/{quote(query_text.lower())}?context=catalogo"
+        response = self._http.get(query_url)
+        response.raise_for_status()
+
+        resource_urls = self._extract_resource_urls(response.text)
+        if not resource_urls:
+            return []
+
+        results: list[BookDocument] = []
+        seen_ids: set[str] = set()
+        for url in resource_urls[: max(1, limit * 2)]:
+            book = self.fetch_resource_live(source_url=url)
+            if not book or book.id in seen_ids:
+                continue
+            seen_ids.add(book.id)
+            results.append(book)
+            if len(results) >= limit:
+                break
+
+        return results
 
     def build_year_url(self, year: int) -> str:
         # KF_KITH:"testo a stampa (moderno)" restricts search to physical modern printed books.
@@ -189,6 +268,7 @@ class OpacScraper:
         author = book.author or self._extract_author(soup)
         material_type = book.material_type or self._extract_material_type(soup)
         year = book.year or self._extract_year(soup)
+        cover_url = getattr(book, "cover_url", None) or self._extract_cover_url(soup, book.source_url)
 
         return book.model_copy(
             update={
@@ -197,8 +277,37 @@ class OpacScraper:
                 "author": author,
                 "material_type": material_type,
                 "year": year,
+                "cover_url": cover_url,
             }
         )
+
+    def _extract_cover_url(self, soup: BeautifulSoup, page_url: str) -> str | None:
+        candidates = soup.select(
+            "img.book-cover, .cover img, .record-cover img, .thumbnail img, "
+            "img[src*='cover'], img[data-src*='cover']"
+        )
+
+        for img in candidates:
+            raw = (
+                img.get("src")
+                or img.get("data-src")
+                or img.get("data-original")
+                or ""
+            ).strip()
+
+            if not raw:
+                continue
+
+            # Se è srcset, prende la prima URL
+            if "," in raw:
+                raw = raw.split(",")[0].strip().split(" ")[0]
+
+            if raw.startswith("//"):
+                raw = "https:" + raw
+
+            return urljoin(page_url, raw)
+
+        return None
 
     def _extract_abstract(self, soup: BeautifulSoup) -> str | None:
         abstract_header = soup.find(["summary", "h3"], string=re.compile("Abstract", re.I))
@@ -235,6 +344,30 @@ class OpacScraper:
                 return segments[1][:250]
         return None
 
+    def _extract_title(self, soup: BeautifulSoup) -> str | None:
+        title_candidates = [
+            soup.select_one("h1"),
+            soup.select_one("h2"),
+            soup.select_one("meta[property='og:title']"),
+            soup.title,
+        ]
+
+        for candidate in title_candidates:
+            if candidate is None:
+                continue
+
+            if getattr(candidate, "name", "") == "meta":
+                content = self._clean_text(str(candidate.get("content", "")))
+                if content:
+                    return content.split("|")[0].strip()[:500]
+                continue
+
+            text = self._clean_text(candidate.get_text(" ", strip=True))
+            if text:
+                return text.split("|")[0].strip()[:500]
+
+        return None
+
     def _extract_material_type(self, soup: BeautifulSoup) -> str | None:
         tag = soup.select_one("span[class*='meta-tipodocumento'], span[class*='tdoc-']")
         return self._clean_text(tag.get_text(" ", strip=True)) if tag else None
@@ -249,6 +382,22 @@ class OpacScraper:
     def _extract_number(self, text: str, label: str) -> int | None:
         match = re.search(rf"{label}:\s*(\d+)", text, re.I)
         return int(match.group(1)) if match else None
+
+    def _extract_resource_urls(self, html: str) -> list[str]:
+        links = re.findall(r'href="(/opac/resource/[^"]+)"', html, flags=re.I)
+        if not links:
+            links = re.findall(r"https://opac\.provincia\.re\.it/opac/resource/[^\s\"'<>]+", html, flags=re.I)
+
+        unique_urls: list[str] = []
+        seen: set[str] = set()
+        for raw in links:
+            full_url = raw if raw.startswith("http") else urljoin(settings.opac_base_url, raw)
+            normalized = full_url.strip()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            unique_urls.append(normalized)
+        return unique_urls
 
     def _clean_text(self, text: str) -> str:
         return re.sub(r"\s+", " ", text).strip()

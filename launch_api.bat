@@ -1,17 +1,20 @@
 @echo off
 setlocal
 
-cd /d "%~dp0rag"
+cd /d "%~dp0api"
 
-if not exist ".venv\Scripts\python.exe" (
-  echo Ambiente Python non trovato in rag\.venv
+set "PY_EXE=.venv_new\Scripts\python.exe"
+if not exist "%PY_EXE%" set "PY_EXE=.venv\Scripts\python.exe"
+
+if not exist "%PY_EXE%" (
+  echo Ambiente Python non trovato in api\.venv_new
   echo Esegui prima:
-  echo   py -3.12 -m venv rag\.venv
-  echo   rag\.venv\Scripts\pip install -r rag\requirements.txt
+  echo   py -3.12 -m venv api\.venv_new
+  echo   api\.venv_new\Scripts\python.exe -m pip install -r api\requirements.txt
   exit /b 1
 )
 
 echo [API] Avvio FastAPI su http://127.0.0.1:8001 ...
-call ".venv\Scripts\python.exe" -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
+call "%PY_EXE%" -m uvicorn app.main:app --host 127.0.0.1 --port 8001 --reload
 
 endlocal

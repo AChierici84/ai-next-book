@@ -19,6 +19,7 @@ type SearchResult = {
 
 type SearchResponse = {
   query: string;
+  source?: string;
   count: number;
   results: SearchResult[];
 };
@@ -89,16 +90,16 @@ export default function Home() {
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col gap-6 px-4 py-8 sm:px-8">
         <div className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-gray-200">
           <p className="text-sm text-gray-700">
-            Ricerca semantica sui libri del <a href="https://opac.provincia.re.it/" className="font-semibold hover:underline" style={{ color: "#EA730B" }}>Sistema Bibliotecario Reggiano</a>, alimentata dalla FastAPI RAG e dal catalogo indicizzato in ChromaDB.
+            Ricerca live sui libri del <a href="https://opac.provincia.re.it/" className="font-semibold hover:underline" style={{ color: "#EA730B" }}>Sistema Bibliotecario Reggiano</a>, con dati letti in tempo reale da OPAC.
           </p>
         </div>
 
         <section className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
             <div className="border-b border-gray-200 bg-gray-50 px-6 py-4">
-              <h2 className="font-semibold text-gray-900">Ricerca RAG</h2>
+              <h2 className="font-semibold text-gray-900">Ricerca OPAC live</h2>
               <p className="mt-1 text-sm text-gray-600">
-                Cerca per temi, atmosfera, autore o tipo di libro. La query verra inviata alla FastAPI locale.
+                Cerca per temi, atmosfera, autore o tipo di libro. La query verra inviata alla FastAPI locale che interroga OPAC.
               </p>
             </div>
 
@@ -112,7 +113,7 @@ export default function Home() {
 
               <div className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
                 <p className="text-sm text-gray-600">Endpoint usato</p>
-                <p className="mt-1 font-mono text-xs text-gray-800">POST /api/search -&gt; FastAPI /query</p>
+                <p className="mt-1 font-mono text-xs text-gray-800">POST /api/search -&gt; FastAPI /query/hybrid (OPAC live)</p>
               </div>
 
               {searchedQuery ? (
@@ -186,7 +187,7 @@ export default function Home() {
             <div className="space-y-0">
               {results.length === 0 ? (
                 <p className="p-4 text-sm text-gray-600">
-                  Nessun risultato ancora. Esegui una ricerca per interrogare la RAG della biblioteca.
+                  Nessun risultato ancora. Esegui una ricerca per interrogare OPAC in tempo reale.
                 </p>
               ) : (
                 results.map((book) => (

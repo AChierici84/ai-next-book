@@ -36,12 +36,13 @@ web/*.tsbuildinfo
 web/next-env.d.ts
 
 
-rag/.venv/
-rag/__pycache__/
-rag/data/chroma/
-rag/playwright-report/
-rag/app/__pycache__/
-
-rag/logs/ingest-opac-*.log
-rag/logs/
+api/.venv_new
+api/__pycache__/
+api/data/chroma/
+api/playwright-report/
+api/app/__pycache__/
+api/app/logs/
+api/app/.env
+api/logs/ingest-opac-*.log
+api/logs/
 

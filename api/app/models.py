@@ -1,5 +1,3 @@
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 
@@ -14,16 +12,17 @@ class BookDocument(BaseModel):
     available_copies: int | None = None
     total_copies: int | None = None
     source_url: str
+    cover_url: str | None = None
     query_year: int
 
     def to_document_text(self) -> str:
         parts = [
             f"Titolo: {self.title}",
             f"Autore: {self.author}" if self.author else None,
+            f"Anno: {self.year}" if self.year else None,
             f"Riassunto: {self.summary}" if self.summary else None,
         ]
         return "\n".join(part for part in parts if part)
-
 
     def to_metadata(self) -> dict[str, str | int | float | bool]:
         return {
@@ -36,6 +35,7 @@ class BookDocument(BaseModel):
             "total_copies": self.total_copies or 0,
             "libraries": " | ".join(self.libraries),
             "source_url": self.source_url,
+            "cover_url": self.cover_url or "",
         }
 
 
@@ -47,21 +47,15 @@ class QueryRequest(BaseModel):
     material_type: str | None = None
 
 
-class QueryResult(BaseModel):
-    id: str
+class HybridQueryRequest(QueryRequest):
+    llm_suggestions: int = Field(default=20, ge=5, le=50)
+
+
+class OpacLookupRequest(BaseModel):
+    resource_id: str | None = None
+    source_url: str | None = None
+
+
+class LlmSuggestion(BaseModel):
     title: str
     author: str | None = None
-    year: int | None = None
-    material_type: str | None = None
-    summary: str | None = None
-    libraries: list[str] = Field(default_factory=list)
-    available_copies: int | None = None
-    total_copies: int | None = None
-    source_url: str
-    score: float
-
-
-class IngestSummary(BaseModel):
-    status: Literal["ok"] = "ok"
-    years_processed: int
-    documents_upserted: int

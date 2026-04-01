@@ -1,48 +1,40 @@
-# RAG biblioteca
+# OPAC live search
 
-Servizio Python separato per:
-
-- estrarre libri da OPAC Reggio Emilia anno per anno
-- salvare i documenti in ChromaDB
-- esporre una FastAPI interrogabile dalla UI web
+Servizio Python FastAPI per cercare libri direttamente su OPAC Reggio Emilia in tempo reale.
 
 ## Stack
 
-- Playwright per navigare la paginazione JS di OPAC
-- BeautifulSoup per parsing HTML
-- ChromaDB come vector store persistente
-- sentence-transformers per embeddings multilingua
-- FastAPI per la query API
+- FastAPI per gli endpoint API
+- httpx per richieste HTTP verso OPAC
+- BeautifulSoup per parsing HTML delle pagine OPAC
+- OpenAI (opzionale) per suggerimenti titolo/autore in query ibrida
 
 ## Setup
 
 ```powershell
-cd rag
+cd api
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+pip install openai python-dotenv
 python -m playwright install chromium
 ```
 
-## Ingest iniziale
+## Configurazione (opzionale per /query/hybrid)
 
-Esempio: dal 2026 al 2024
+Crea il file `api/app/.env`:
 
-```powershell
-python ingest_opac.py --start-year 2026 --end-year 2024
+```env
+OPENAI_API_KEY=YOUR_API_KEY
+LLM_MODEL=gpt-5-mini
 ```
 
-Esempio rapido limitando le pagine per test:
-
-```powershell
-python ingest_opac.py --start-year 2026 --end-year 2026 --max-pages-per-year 3
-```
-
-I dati vengono salvati in `rag/data/chroma`.
+Se `OPENAI_API_KEY` non e impostata, `/query/hybrid` usa il fallback di ricerca OPAC sul testo query.
 
 ## Avvio API
 
 ```powershell
+cd api
 uvicorn app.main:app --reload --port 8001
 ```
 
@@ -60,26 +52,62 @@ GET /health
 GET /stats
 ```
 
-### Query semantica
+In modalita OPAC-only ritorna `documents: 0`.
+
+### Lookup diretto record OPAC
+
+```http
+POST /opac/lookup
+Content-Type: application/json
+
+{
+  "resource_id": "RE201256228"
+}
+```
+
+oppure
+
+```http
+POST /opac/lookup
+Content-Type: application/json
+
+{
+  "source_url": "https://opac.provincia.re.it/opac/resource/la-ragazza-nella-nebbia-romanzo/RE201256228"
+}
+```
+
+### Query OPAC live
 
 ```http
 POST /query
 Content-Type: application/json
 
 {
-  "query": "romanzo storico ambientato in italia",
-  "limit": 5,
-  "year_from": 2020,
-  "year_to": 2026
+  "query": "giallo italiano ambientato in montagna",
+  "limit": 8,
+  "year_from": null,
+  "year_to": null,
+  "material_type": "testo a stampa (moderno)"
 }
 ```
 
-## Integrazione con la UI web
+### Query ibrida OPAC live (LLM titolo/autore -> OPAC)
 
-La UI Next.js puo chiamare la FastAPI su `http://localhost:8001/query` e usare i risultati come sorgente RAG per suggerimenti piu accurati.
+```http
+POST /query/hybrid
+Content-Type: application/json
 
-## Note operative
+{
+  "query": "consigliami gialli italiani in montagna",
+  "limit": 8,
+  "llm_suggestions": 20,
+  "year_from": null,
+  "year_to": null,
+  "material_type": "testo a stampa (moderno)"
+}
+```
 
-- La paginazione di OPAC e gestita via JavaScript: per questo l'ingest usa Playwright.
-- Il crawler visita la pagina anno, attraversa le pagine risultati e poi arricchisce i record aprendo le schede dettaglio.
-- Per ingest molto grandi conviene eseguire per blocchi di anni.
+## Integrazione UI
+
+La route Next.js `POST /api/search` inoltra a FastAPI `POST /query/hybrid`.
+I risultati mostrati in UI provengono da OPAC live.

@@ -1,23 +1,20 @@
 # ai-next-book (web)
 
-Chat assistant per aiutare l'utente a scegliere un libro e verificarne la disponibilita in biblioteca.
+Interfaccia web per cercare libri sul catalogo OPAC Reggio Emilia e verificare disponibilita in tempo reale.
 
 ## Stack
 
 - Next.js (App Router, TypeScript)
 - LangChain JS (agent + tool calling)
 - OpenAI model via provider `openai:*`
+- FastAPI backend OPAC live su `http://localhost:8001`
 
 ## Flusso MVP
 
-1. Utente scrive preferenze in chat.
-2. L'agent usa `search_books` sul catalogo locale mock.
-3. L'agent usa `check_library_availability` per i titoli suggeriti.
-4. Il tool interroga OPAC Reggio Emilia su `https://opac.provincia.re.it/opac/query/{titolo}?context=catalogo`.
-5. Se OPAC non risponde o non e parsabile, usa fallback ai dati mock locali.
-6. API restituisce risposta strutturata:
-	- `assistantReply`
-	- `recommendations[]` con copie disponibili, biblioteca e scaffale.
+1. La pagina principale invia la richiesta a `POST /api/search`.
+2. L'API Next inoltra al backend FastAPI `POST /query/hybrid`.
+3. Il backend cerca direttamente su OPAC (titolo/autore suggeriti da LLM oppure query testuale).
+4. La UI mostra risultati live con disponibilita e link alla scheda OPAC.
 
 ## Setup
 
@@ -50,12 +47,13 @@ Poi apri http://localhost:3000
 ## File principali
 
 - `src/app/page.tsx`: UI chat + pannello suggerimenti.
+- `src/app/api/search/route.ts`: proxy verso FastAPI backend OPAC.
 - `src/app/api/chat/route.ts`: endpoint chat che invoca LangChain.
 - `src/lib/agent.ts`: definizione agent e tool.
-- `src/lib/catalog.ts`: catalogo mock + disponibilita mock.
+- `src/lib/catalog.ts`: tool di disponibilita OPAC (+ fallback mock per chat).
 
 ## Prossimi passi consigliati
 
-- Sostituire `catalog.ts` con DB/Vector Store reale.
-- Collegare un'API reale del sistema bibliotecario.
-- Aggiungere autenticazione e cronologia utente.
+- Unificare il flusso chat con la stessa pipeline OPAC live usata nella ricerca.
+- Ridurre i fallback mock in produzione.
+- Aggiungere telemetria su tempi risposta OPAC e zero-result rate.

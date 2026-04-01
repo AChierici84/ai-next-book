@@ -1,53 +1,35 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-export const dynamic = "force-dynamic";
-export const runtime = "nodejs";
+const API_BASE =
+  process.env.OPAC_API_BASE_URL ??
+  process.env.RAG_API_BASE_URL ??
+  "http://localhost:8001";
 
-const DEFAULT_RAG_API_URL = "http://127.0.0.1:8001";
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = (await req.json()) as {
-      query?: string;
-      limit?: number;
-      yearFrom?: number | null;
-      yearTo?: number | null;
-      materialType?: string | null;
-    };
+    const body = await req.json();
 
-    const query = body.query?.trim();
-    if (!query) {
-      return NextResponse.json({ error: "Query vuota." }, { status: 400 });
-    }
-
-    const ragApiUrl = process.env.RAG_API_URL?.trim() || DEFAULT_RAG_API_URL;
-    const upstream = await fetch(`${ragApiUrl}/query`, {
+    const upstream = await fetch(`${API_BASE}/query/hybrid`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      cache: "no-store",
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        query,
+        query: body.query,
         limit: body.limit ?? 8,
+        llm_suggestions: body.llm_suggestions ?? 20,
         year_from: body.yearFrom ?? null,
         year_to: body.yearTo ?? null,
-        material_type: body.materialType?.trim() ? body.materialType.trim() : null,
+        material_type: body.materialType ?? null,
       }),
+      cache: "no-store",
     });
 
     const data = await upstream.json();
     if (!upstream.ok) {
-      const error = typeof data?.detail === "string" ? data.detail : "Errore dalla FastAPI RAG.";
-      return NextResponse.json({ error }, { status: upstream.status });
+      return NextResponse.json({ error: data?.detail ?? "Errore upstream" }, { status: upstream.status });
     }
 
     return NextResponse.json(data);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Errore sconosciuto";
-    return NextResponse.json(
-      { error: `Impossibile contattare la FastAPI RAG: ${message}` },
-      { status: 500 },
-    );
+  } catch {
+    return NextResponse.json({ error: "Richiesta non valida" }, { status: 400 });
   }
 }
