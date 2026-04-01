@@ -10,6 +10,7 @@ type SearchResult = {
   year?: number | null;
   material_type?: string | null;
   summary?: string | null;
+  cover_url?: string | null;
   libraries: string[];
   available_copies?: number | null;
   total_copies?: number | null;
@@ -31,6 +32,25 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [searchedQuery, setSearchedQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [expandedSummaries, setExpandedSummaries] = useState<Record<string, boolean>>({});
+
+  function truncateSummary(summary: string, max = 100) {
+    const normalized = summary.trim();
+    if (normalized.length <= max) {
+      return { text: normalized, truncated: false };
+    }
+    return {
+      text: `${normalized.slice(0, max).trimEnd()}...`,
+      truncated: true,
+    };
+  }
+
+  function toggleSummary(bookId: string) {
+    setExpandedSummaries((current) => ({
+      ...current,
+      [bookId]: !current[bookId],
+    }));
+  }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -61,6 +81,7 @@ export default function Home() {
       }
 
       setResults(data.results);
+      setExpandedSummaries({});
     } finally {
       setLoading(false);
     }
@@ -192,41 +213,80 @@ export default function Home() {
               ) : (
                 results.map((book) => (
                   <article key={book.id} className="border-b border-gray-100 p-4 last:border-b-0">
-                    <div className="flex items-start justify-between gap-4">
-                      <div>
-                        <h3 className="font-semibold text-gray-900">{book.title}</h3>
-                        <p className="mt-1 text-sm text-gray-600">
-                          {book.author || "Autore non disponibile"}
-                          {book.year ? ` - ${book.year}` : ""}
-                        </p>
+                    <div className="flex gap-4">
+                      <div className="shrink-0">
+                        {book.cover_url ? (
+                          <img
+                            src={book.cover_url}
+                            alt={`Copertina di ${book.title}`}
+                            className="h-28 w-20 rounded object-cover ring-1 ring-gray-200"
+                            loading="lazy"
+                            referrerPolicy="no-referrer"
+                          />
+                        ) : (
+                          <div className="flex h-28 w-20 items-center justify-center rounded bg-gray-100 text-center text-[10px] text-gray-500 ring-1 ring-gray-200">
+                            Nessuna copertina
+                          </div>
+                        )}
                       </div>
-                      <span className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600">
-                        score {book.score.toFixed(3)}
-                      </span>
-                    </div>
 
-                    {book.material_type ? (
-                      <p className="mt-2 text-xs uppercase tracking-wide text-gray-500">{book.material_type}</p>
-                    ) : null}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-4">
+                          <div>
+                            <h3 className="font-semibold text-gray-900">{book.title}</h3>
+                            <p className="mt-1 text-sm text-gray-600">
+                              {book.author || "Autore non disponibile"}
+                            </p>
+                            <p className="mt-1 text-xs text-gray-500">
+                              {book.year ? `Anno: ${book.year}` : "Anno non disponibile"}
+                            </p>
+                          </div>
+                          <span className="rounded-full bg-gray-100 px-2 py-1 text-xs text-gray-600">
+                            score {book.score.toFixed(3)}
+                          </span>
+                        </div>
 
-                    {book.summary ? <p className="mt-3 text-sm text-gray-800">{book.summary}</p> : null}
+                        {book.material_type ? (
+                          <p className="mt-2 text-xs uppercase tracking-wide text-gray-500">{book.material_type}</p>
+                        ) : null}
 
-                    <div className="mt-3 space-y-1">
-                      <p className="text-xs font-semibold text-blue-600">
-                        {book.available_copies && book.available_copies > 0
-                          ? `Disponibile: ${book.available_copies} copie su ${book.total_copies ?? "?"}`
-                          : "Attualmente non disponibile"}
-                      </p>
-                      {book.libraries.length > 0 ? <p className="text-xs text-gray-600">{book.libraries.join("; ")}</p> : null}
-                      <a
-                        href={book.source_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex text-xs font-semibold hover:underline"
-                        style={{ color: "#EA730B" }}
-                      >
-                        Apri scheda OPAC
-                      </a>
+                        {book.summary ? (
+                          <div className="mt-3">
+                            <p className="text-sm text-gray-800">
+                              {expandedSummaries[book.id]
+                                ? book.summary
+                                : truncateSummary(book.summary).text}
+                            </p>
+                            {truncateSummary(book.summary).truncated ? (
+                              <button
+                                type="button"
+                                onClick={() => toggleSummary(book.id)}
+                                className="mt-1 text-xs font-semibold hover:underline"
+                                style={{ color: "#EA730B" }}
+                              >
+                                {expandedSummaries[book.id] ? "Mostra meno" : "Mostra di piu"}
+                              </button>
+                            ) : null}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 space-y-1">
+                          <p className="text-xs font-semibold text-blue-600">
+                            {book.available_copies && book.available_copies > 0
+                              ? `Disponibile: ${book.available_copies} copie su ${book.total_copies ?? "?"}`
+                              : "Attualmente non disponibile"}
+                          </p>
+                          <a
+                            href={book.source_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex text-xs font-semibold hover:underline"
+                            style={{ color: "#EA730B" }}
+                          >
+                            Apri scheda OPAC
+                          </a>
+                        </div>
+                      </div>
                     </div>
                   </article>
                 ))

@@ -128,7 +128,12 @@ def query_books(payload: QueryRequest):
     try:
         scraper = OpacScraper(logger=logger)
         try:
-            candidates = scraper.search_books_live(title=payload.query, author=None, limit=payload.limit)
+            candidates = scraper.search_books_live(
+                title=payload.query,
+                author=None,
+                limit=payload.limit,
+                material_type=payload.material_type,
+            )
             for book in candidates:
                 if not _passes_filters(
                     {
@@ -185,7 +190,12 @@ def query_books_hybrid(payload: HybridQueryRequest):
         try:
             scraper = OpacScraper(logger=logger)
             try:
-                candidates = scraper.search_books_live(title=payload.query, author=None, limit=payload.limit)
+                candidates = scraper.search_books_live(
+                    title=payload.query,
+                    author=None,
+                    limit=payload.limit,
+                    material_type=payload.material_type,
+                )
                 for book in candidates:
                     if not _passes_filters(
                         {
@@ -222,7 +232,12 @@ def query_books_hybrid(payload: HybridQueryRequest):
             seen_ids: set[str] = set()
             max_pairs = min(len(pairs), max(payload.limit * 2, 8))
             for title, author in pairs[:max_pairs]:
-                candidates = scraper.search_books_live(title=title, author=author, limit=1)
+                candidates = scraper.search_books_live(
+                    title=title,
+                    author=author,
+                    limit=1,
+                    material_type=payload.material_type,
+                )
                 for book in candidates:
                     if book.id in seen_ids:
                         continue
@@ -271,7 +286,12 @@ def query_books_hybrid(payload: HybridQueryRequest):
     try:
         scraper = OpacScraper(logger=logger)
         try:
-            candidates = scraper.search_books_live(title=payload.query, author=None, limit=payload.limit)
+            candidates = scraper.search_books_live(
+                title=payload.query,
+                author=None,
+                limit=payload.limit,
+                material_type=payload.material_type,
+            )
             for book in candidates:
                 if not _passes_filters(
                     {

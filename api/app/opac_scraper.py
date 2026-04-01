@@ -89,6 +89,7 @@ class OpacScraper:
         title: str,
         author: str | None = None,
         limit: int = 3,
+        material_type: str | None = None,
     ) -> list[BookDocument]:
         title_value = (title or "").strip()
         author_value = (author or "").strip()
@@ -96,12 +97,23 @@ class OpacScraper:
             return []
 
         query_text = f"{title_value} {author_value}".strip()
-        query_url = f"{settings.opac_base_url}/opac/query/{quote(query_text.lower())}?context=catalogo"
-        response = self._http.get(query_url)
-        response.raise_for_status()
+        resource_urls = self._search_resource_urls(query_text, material_type=material_type)
+        if not resource_urls and author_value:
+            if self._logger:
+                self._logger.info(
+                    "OPAC live fallback to title-only | title=%r | author=%r",
+                    title_value,
+                    author_value,
+                )
+            resource_urls = self._search_resource_urls(title_value, material_type=material_type)
 
-        resource_urls = self._extract_resource_urls(response.text)
         if not resource_urls:
+            if self._logger:
+                self._logger.info(
+                    "OPAC live no resource urls | title=%r | author=%r",
+                    title_value,
+                    author_value,
+                )
             return []
 
         results: list[BookDocument] = []
@@ -116,6 +128,27 @@ class OpacScraper:
                 break
 
         return results
+
+    def _search_resource_urls(self, query_text: str, material_type: str | None = None) -> list[str]:
+        query_encoded = quote(query_text.lower())
+        normalized_material = (material_type or "").strip().lower()
+        material_clause = ""
+
+        if normalized_material == "testo a stampa (moderno)":
+            material_clause = "%20KF_KITH:%22testo%20a%20stampa%20(moderno)%22"
+
+        query_url = f"{settings.opac_base_url}/opac/query/{query_encoded}{material_clause}?context=catalogo"
+        response = self._http.get(query_url)
+        response.raise_for_status()
+        resource_urls = self._extract_resource_urls(response.text)
+        if self._logger:
+            self._logger.info(
+                "OPAC query parsed | query=%r | material_type=%r | resource_urls=%s",
+                query_text,
+                material_type,
+                len(resource_urls),
+            )
+        return resource_urls
 
     def build_year_url(self, year: int) -> str:
         # KF_KITH:"testo a stampa (moderno)" restricts search to physical modern printed books.
@@ -215,22 +248,31 @@ class OpacScraper:
         return YearPageSnapshot(books=books, total_results=total_results, total_pages=total_pages)
 
     def _parse_result_item(self, item: Tag, year: int) -> BookDocument | None:
-        title_link = item.select_one("h3 a[href*='/opac/resource/']")
-        if not title_link or not title_link.get("href"):
+        title_tag = item.select_one("h3.titololistarisultati") or item.select_one("h3")
+        resource_link = item.select_one("a[href*='/opac/resource/']")
+
+        if not title_tag or not resource_link or not resource_link.get("href"):
             return None
 
-        source_url = urljoin(settings.opac_base_url, str(title_link["href"]))
+        source_url = urljoin(settings.opac_base_url, str(resource_link["href"]))
         resource_id = source_url.rstrip("/").split("/")[-1]
-        title = self._clean_text(title_link.get_text(" ", strip=True))
+        title = self._clean_text(title_tag.get_text(" ", strip=True))
+        author_tag = item.select_one("p.autorelistarisultati")
+        year_tag = item.select_one("span.meta-annopubblicazione")
 
         text_lines = [self._clean_text(line) for line in item.get_text("\n", strip=True).splitlines()]
         text_lines = [line for line in text_lines if line and line not in {title, "Richiedi", "Richiedi in consultazione"}]
 
         available_copies = self._extract_number(item.get_text(" ", strip=True), "Disponibili")
         total_copies = self._extract_number(item.get_text(" ", strip=True), "Copie per prestito")
-        author = None
+        author = self._clean_text(author_tag.get_text(" ", strip=True)) if author_tag else None
         material_type = None
         parsed_year = year
+
+        if year_tag:
+            year_match = re.search(r"(19|20)\d{2}", year_tag.get_text(" ", strip=True))
+            if year_match:
+                parsed_year = int(year_match.group(0))
 
         for line in text_lines[:4]:
             if re.fullmatch(r"\d{4}", line):
@@ -283,6 +325,7 @@ class OpacScraper:
 
     def _extract_cover_url(self, soup: BeautifulSoup, page_url: str) -> str | None:
         candidates = soup.select(
+            "img[data-type='copertina'], "
             "img.book-cover, .cover img, .record-cover img, .thumbnail img, "
             "img[src*='cover'], img[data-src*='cover']"
         )
@@ -314,11 +357,12 @@ class OpacScraper:
         if abstract_header:
             container = abstract_header.find_parent(["details", "div", "section"])
             if container:
-                text = self._clean_text(container.get_text(" ", strip=True))
+                text = self._sanitize_opac_text(container.get_text(" ", strip=True))
                 return text[:4000] if text else None
         meta_desc = soup.find("meta", attrs={"name": "description"})
         if meta_desc and meta_desc.get("content"):
-            return self._clean_text(str(meta_desc["content"]))[:4000]
+            text = self._sanitize_opac_text(str(meta_desc["content"]))
+            return text[:4000] if text else None
         return None
 
     def _extract_libraries(self, soup: BeautifulSoup) -> list[str]:
@@ -346,7 +390,9 @@ class OpacScraper:
 
     def _extract_title(self, soup: BeautifulSoup) -> str | None:
         title_candidates = [
-            soup.select_one("h1"),
+             soup.select_one("h3[class='titololistarisultati']"),
+            soup.select_one("meta[property='og:title']"),
+             soup.select_one("h1"),
             soup.select_one("h2"),
             soup.select_one("meta[property='og:title']"),
             soup.title,
@@ -357,12 +403,12 @@ class OpacScraper:
                 continue
 
             if getattr(candidate, "name", "") == "meta":
-                content = self._clean_text(str(candidate.get("content", "")))
+                content = self._sanitize_opac_text(str(candidate.get("content", "")))
                 if content:
                     return content.split("|")[0].strip()[:500]
                 continue
 
-            text = self._clean_text(candidate.get_text(" ", strip=True))
+            text = self._sanitize_opac_text(candidate.get_text(" ", strip=True))
             if text:
                 return text.split("|")[0].strip()[:500]
 
@@ -384,7 +430,16 @@ class OpacScraper:
         return int(match.group(1)) if match else None
 
     def _extract_resource_urls(self, html: str) -> list[str]:
-        links = re.findall(r'href="(/opac/resource/[^"]+)"', html, flags=re.I)
+        soup = BeautifulSoup(html, "lxml")
+        links = []
+
+        for anchor in soup.select("a[href*='/opac/resource/']"):
+            href = str(anchor.get("href") or "").strip()
+            if href:
+                links.append(href)
+
+        if not links:
+            links = re.findall(r'href=["\'](/opac/resource/[^"\']+)["\']', html, flags=re.I)
         if not links:
             links = re.findall(r"https://opac\.provincia\.re\.it/opac/resource/[^\s\"'<>]+", html, flags=re.I)
 
@@ -401,3 +456,25 @@ class OpacScraper:
 
     def _clean_text(self, text: str) -> str:
         return re.sub(r"\s+", " ", text).strip()
+
+    def _sanitize_opac_text(self, text: str) -> str:
+        cleaned = self._clean_text(text)
+        lower = cleaned.lower()
+        generic_markers = [
+            "opac",
+            "catalogo online",
+            "servizi bibliotecari",
+            "sebina",
+            "biblioteca",
+        ]
+
+        if all(marker in lower for marker in ["opac", "sebina"]):
+            return ""
+
+        if lower.startswith("opac ") or lower.startswith("catalogo online"):
+            return ""
+
+        if sum(marker in lower for marker in generic_markers) >= 3:
+            return ""
+
+        return cleaned

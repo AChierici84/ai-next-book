@@ -8,6 +8,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 from openai import OpenAI
 
+from app.config import settings
 from app.models import LlmSuggestion
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ logger = logging.getLogger(__name__)
 def _build_prompt(query: str, n: int) -> str:
     strict_rules = (
             "- NON fare domande all'utente\n"
+            "- DIVIETO ASSOLUTO: non chiedere chiarimenti, conferme o permessi\n"
             "- NON chiedere se puoi usare il web\n"
             "- NON inserire il campo request o altri campi extra\n"
             "- Se sei incerto, fornisci comunque titoli noti e plausibili\n"
@@ -31,6 +33,22 @@ def _build_prompt(query: str, n: int) -> str:
         "- Includi classici e libri molto conosciuti se pertinenti\n"
         f"{strict_rules}"
         f"Elenca {n} libri reali che corrispondono a questa richiesta: {query}"
+    )
+
+
+def _build_non_empty_retry_prompt(query: str, n: int) -> str:
+    return (
+        "Sei un esperto bibliotecario. "
+        "Rispondi SOLO con JSON valido, senza testo extra, senza markdown. "
+        'Formato esatto: {"books":[{"title":"...","author":"..."}]}. '
+        "REGOLE:\n"
+        "- NON restituire mai books vuoto\n"
+        "- Restituisci almeno 20 libri\n"
+        "- Se non sei sicuro della pertinenza perfetta, proponi comunque titoli italiani noti e plausibili per la richiesta\n"
+        "- NON fare domande all'utente\n"
+        "- DIVIETO ASSOLUTO: non chiedere chiarimenti, conferme o permessi\n"
+        "- NON aggiungere testo diverso da books\n"
+        f"Fornisci {n} suggerimenti per: {query}"
     )
 
 
@@ -60,11 +78,19 @@ def suggest_books_from_llm(query: str, n: int = 20) -> list[LlmSuggestion]:
         logger.warning("llm suggestions skipped | reason=missing_openai_api_key")
         return []
 
-    client = OpenAI(api_key=api_key)
+    suggestion_count = min(max(n, 1), 8)
+    client = OpenAI(api_key=api_key, timeout=settings.llm_timeout_seconds)
     model = os.getenv("LLM_MODEL", "gpt-5-mini")
 
-    prompt = _build_prompt(query=query, n=n)
-    logger.info("llm suggestions start | model=%s | n=%s | query=%r", model, n, query)
+    prompt = _build_prompt(query=query, n=suggestion_count)
+    logger.info(
+        "llm suggestions start | model=%s | requested_n=%s | actual_n=%s | timeout_s=%s | query=%r",
+        model,
+        n,
+        suggestion_count,
+        settings.llm_timeout_seconds,
+        query,
+    )
 
     try:
         resp = client.responses.create(model=model, input=prompt)
@@ -73,8 +99,19 @@ def suggest_books_from_llm(query: str, n: int = 20) -> list[LlmSuggestion]:
         data = _parse_json_payload(raw_output)
         items = _extract_items(data)
 
+        if not items:
+            logger.warning("llm returned empty books on first attempt | retrying with non-empty prompt")
+            retry_prompt = _build_non_empty_retry_prompt(query=query, n=suggestion_count)
+            retry_resp = client.responses.create(model=model, input=retry_prompt)
+            retry_raw_output = (retry_resp.output_text or "").strip()
+            logger.info("llm raw output retry | preview=%r", retry_raw_output[:1200])
+            retry_data = _parse_json_payload(retry_raw_output)
+            retry_items = _extract_items(retry_data)
+            if retry_items:
+                items = retry_items
+
         out: list[LlmSuggestion] = []
-        for it in items[:n]:
+        for it in items[:suggestion_count]:
             title = str(it.get("title") or it.get("titolo") or "").strip()
             author = str(it.get("author") or it.get("autore") or "").strip() or None
             if title:
