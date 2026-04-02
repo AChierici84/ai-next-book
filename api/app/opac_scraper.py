@@ -11,7 +11,7 @@ import httpx
 from bs4 import BeautifulSoup, Tag
 from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
 from playwright.sync_api import sync_playwright
-from tenacity import retry, stop_after_attempt, wait_fixed
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_fixed
 
 from app.config import settings
 from app.models import BookDocument
@@ -31,14 +31,27 @@ class OpacScraper:
     def __init__(self, logger: logging.Logger | None = None) -> None:
         self._http = httpx.Client(
             timeout=settings.request_timeout_seconds,
-            headers={"User-Agent": settings.user_agent},
+            headers={
+                "User-Agent": settings.user_agent,
+                "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                "Accept-Language": "it-IT,it;q=0.9,en;q=0.8",
+                "Connection": "close",
+            },
             follow_redirects=True,
+            http2=False,
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=0),
         )
         self._logger = logger
 
     def close(self) -> None:
         self._http.close()
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
+        reraise=True,
+    )
     def fetch_resource_live(
         self,
         resource_id: str | None = None,
@@ -119,7 +132,16 @@ class OpacScraper:
         results: list[BookDocument] = []
         seen_ids: set[str] = set()
         for url in resource_urls[: max(1, limit * 2)]:
-            book = self.fetch_resource_live(source_url=url)
+            try:
+                book = self.fetch_resource_live(source_url=url)
+            except (httpx.TransportError, httpx.HTTPStatusError) as error:
+                if self._logger:
+                    self._logger.warning(
+                        "OPAC live resource fetch failed | url=%s | error=%s",
+                        url,
+                        error,
+                    )
+                continue
             if not book or book.id in seen_ids:
                 continue
             seen_ids.add(book.id)
@@ -129,6 +151,12 @@ class OpacScraper:
 
         return results
 
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
+        reraise=True,
+    )
     def _search_resource_urls(self, query_text: str, material_type: str | None = None) -> list[str]:
         query_encoded = quote(query_text.lower())
         normalized_material = (material_type or "").strip().lower()
@@ -299,7 +327,12 @@ class OpacScraper:
             total_copies=total_copies,
         )
 
-    @retry(stop=stop_after_attempt(3), wait=wait_fixed(1))
+    @retry(
+        stop=stop_after_attempt(3),
+        wait=wait_fixed(1),
+        retry=retry_if_exception_type((httpx.TransportError, httpx.HTTPStatusError)),
+        reraise=True,
+    )
     def _enrich_book(self, book: BookDocument) -> BookDocument:
         response = self._http.get(book.source_url)
         response.raise_for_status()

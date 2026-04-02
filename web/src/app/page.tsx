@@ -25,10 +25,25 @@ type SearchResponse = {
   results: SearchResult[];
 };
 
+type ExportPdfRequest = {
+  query: string;
+  books: SearchResult[];
+};
+
+function getFilenameFromDisposition(contentDisposition: string | null) {
+  if (!contentDisposition) {
+    return "libri_suggeriti.pdf";
+  }
+
+  const match = contentDisposition.match(/filename="?([^";]+)"?/i);
+  return match?.[1] ?? "libri_suggeriti.pdf";
+}
+
 export default function Home() {
   const [input, setInput] = useState("");
   const [materialType, setMaterialType] = useState("testo a stampa (moderno)");
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchedQuery, setSearchedQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -50,6 +65,47 @@ export default function Home() {
       ...current,
       [bookId]: !current[bookId],
     }));
+  }
+
+  async function onExportPdf() {
+    if (!searchedQuery || results.length === 0 || exporting) {
+      return;
+    }
+
+    setExporting(true);
+    setError(null);
+
+    const payload: ExportPdfRequest = {
+      query: searchedQuery,
+      books: results,
+    };
+
+    try {
+      const response = await fetch("/api/export/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => null)) as { error?: string } | null;
+        throw new Error(data?.error ?? "Errore durante l'export PDF.");
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = downloadUrl;
+      link.download = getFilenameFromDisposition(response.headers.get("content-disposition"));
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Errore durante l'export PDF.");
+    } finally {
+      setExporting(false);
+    }
   }
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
@@ -127,9 +183,9 @@ export default function Home() {
             <div className="space-y-4 bg-gray-50 p-4">
               <div className="rounded-lg border border-dashed border-gray-300 bg-white p-4 text-sm text-gray-600">
                 <p className="font-semibold text-gray-900">Suggerimenti query</p>
-                <p className="mt-2">"giallo italiano ambientato in montagna"</p>
-                <p>"fantascienza politica con worldbuilding forte"</p>
-                <p>"saggio breve su tecnologia e societa"</p>
+                <p className="mt-2">&quot;giallo italiano ambientato in montagna&quot;</p>
+                <p>&quot;fantascienza politica con worldbuilding forte&quot;</p>
+                <p>&quot;saggio breve su tecnologia e societa&quot;</p>
               </div>
 
               <div className="rounded-lg bg-white p-4 ring-1 ring-gray-200">
@@ -202,8 +258,17 @@ export default function Home() {
           </div>
 
           <aside className="rounded-lg bg-white shadow-sm ring-1 ring-gray-200">
-            <div className="border-b border-gray-200 bg-gray-50 px-4 py-3">
+            <div className="flex items-center justify-between gap-3 border-b border-gray-200 bg-gray-50 px-4 py-3">
               <h3 className="text-sm font-semibold text-gray-900">Risultati biblioteca</h3>
+              <button
+                type="button"
+                onClick={onExportPdf}
+                disabled={results.length === 0 || exporting || loading}
+                className="rounded px-3 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ backgroundColor: "#EA730B" }}
+              >
+                {exporting ? "Esporto PDF..." : "Export PDF"}
+              </button>
             </div>
             <div className="space-y-0">
               {results.length === 0 ? (

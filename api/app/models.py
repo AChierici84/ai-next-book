@@ -59,3 +59,23 @@ class OpacLookupRequest(BaseModel):
 class LlmSuggestion(BaseModel):
     title: str
     author: str | None = None
+
+
+class ExportBook(BaseModel):
+    id: str
+    title: str
+    author: str | None = None
+    year: int | None = None
+    material_type: str | None = None
+    summary: str | None = None
+    libraries: list[str] = Field(default_factory=list)
+    available_copies: int | None = None
+    total_copies: int | None = None
+    source_url: str
+    cover_url: str | None = None
+    score: float | None = None
+
+
+class ExportPdfRequest(BaseModel):
+    query: str
+    books: list[ExportBook]

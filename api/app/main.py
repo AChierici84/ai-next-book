@@ -1,13 +1,16 @@
+import io
 import logging
 from time import perf_counter
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi import Response
+from fastapi.responses import StreamingResponse
 
 from app.config import settings
 from app.llm_recommender import suggest_books_from_llm
-from app.models import HybridQueryRequest, OpacLookupRequest, QueryRequest
+from app.models import HybridQueryRequest, OpacLookupRequest, QueryRequest, ExportPdfRequest
 from app.opac_scraper import OpacScraper
+from app.pdf_exporter import generate_books_pdf
 
 logging.basicConfig(
     level=logging.INFO,
@@ -324,3 +327,23 @@ def query_books_hybrid(payload: HybridQueryRequest):
         "count": len(fallback_results),
         "results": fallback_results,
     }
+
+
+@app.post("/export/pdf")
+def export_books_pdf(payload: ExportPdfRequest):
+    """Esporta in PDF i libri già mostrati all'utente."""
+    logger.info("/export/pdf received | query=%r | books_count=%s", payload.query, len(payload.books))
+
+    pdf_bytes = generate_books_pdf(
+        books=payload.books,
+        title="Libri Consigliati",
+        query=payload.query,
+    )
+
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={
+            "Content-Disposition": 'attachment; filename="libri_suggeriti.pdf"'
+        },
+    )
